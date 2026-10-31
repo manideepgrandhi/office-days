@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cut">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-E4w7ESjjv5NKC2QS8kMZSNTM/+6HOr2Fb3w/74y/0Rc=' 'sha256-PP6s0lYhSwmN8D0pVOhV45WCNw1NfAskiuL3qFmzskE=' 'sha256-hyZozFfSwJoca+WVPSZnF6xwEKId1/fNMsF+eYdQWwg=' 'sha256-0/12NsjcKX8gUx0NnaF3CYzjLzxXypUDrP/fVYevBdc='; style-src 'sha256-txZRAbPYm4SkP5tP+6u0mvXYXiee2TC/7AOamIJG+WI=' 'sha256-i1rZtPwLAoKBf+Y3wvm6QEz6H7wTAD0aGD1w3C656AE='; img-src 'self' data:; manifest-src 'self'; connect-src https://api.github.com https://manideepgrandhi.github.io/search-index.json; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-E4w7ESjjv5NKC2QS8kMZSNTM/+6HOr2Fb3w/74y/0Rc=' 'sha256-PP6s0lYhSwmN8D0pVOhV45WCNw1NfAskiuL3qFmzskE=' 'sha256-hyZozFfSwJoca+WVPSZnF6xwEKId1/fNMsF+eYdQWwg=' 'sha256-+jf8KveIXbRA7DG0V3s4WolAaEUA2GRIcaGVV0ciw20='; style-src 'sha256-txZRAbPYm4SkP5tP+6u0mvXYXiee2TC/7AOamIJG+WI=' 'sha256-i1rZtPwLAoKBf+Y3wvm6QEz6H7wTAD0aGD1w3C656AE='; img-src 'self' data:; manifest-src 'self'; connect-src https://api.github.com https://manideepgrandhi.github.io/search-index.json; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#2563eb">
 <meta name="robots" content="noindex">
@@ -458,28 +458,44 @@ $("imp").onchange=function(){var f=this.files[0];this.value="";if(!f)return;if(f
 /* ---------- GitHub sync (Contents API) ---------- */
 var API="https://api.github.com",PATH="days.json",RREPO=/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 function tok(){return ls(K.tok)||""}function repo(){var r=ls(K.repo)||"manideepgrandhi/office-days";return RREPO.test(r)?r:""}
-function syncUI(t){var c=!!tok();$("setup").hidden=c;$("connected").hidden=!c;$("syncstate").textContent=t||(c?"Connected to "+repo()+".":"Not connected. Days are saved in this browser only.")}
+function syncUI(t,err){var c=!!tok();$("setup").hidden=c;$("connected").hidden=!c;$("syncnow").textContent=err?"Retry":"Sync now";$("syncstate").textContent=t||(c?"Connected to "+repo()+".":"Not connected. Days are saved in this browser only.")}
 function b64d(s){var b=atob(s.replace(/\s/g,"")),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return new TextDecoder().decode(u)}
 function b64e(s){var u=new TextEncoder().encode(s),b="";for(var i=0;i<u.length;i++)b+=String.fromCharCode(u[i]);return btoa(b)}
 function gh(method,body){return fetch(API+"/repos/"+repo()+"/contents/"+PATH+(method==="GET"?"?t="+Date.now():""),{method:method,cache:"no-store",headers:{"Authorization":"Bearer "+tok(),"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined})}
 function getRemote(){return gh("GET").then(function(r){if(r.status===404)return{sha:null,days:[]};if(!r.ok)throw new Error("GitHub "+r.status);return r.json().then(function(j){return{sha:j.sha,days:clean(JSON.parse(b64d(j.content||"")||"[]"))}})})}
-function putRemote(list,sha,note){var b={message:note,content:b64e(JSON.stringify(list,null,1)+"\n")};if(sha)b.sha=sha;return gh("PUT",b).then(function(r){if(r.status===409||r.status===422)return"conflict";if(!r.ok)throw new Error("GitHub "+r.status);return"ok"})}
-var busy=Promise.resolve();
-function update(fn,note){if(!tok()||!repo())return Promise.resolve();
- busy=busy.then(function(){var tries=0;function go(){return getRemote().then(function(rm){var set=new Set(rm.days);fn(set);var list=Array.from(set).sort();
-   if(list.join()===rm.days.join())return list;return putRemote(list,rm.sha,note).then(function(res){if(res==="conflict"){if(++tries<4)return go();throw new Error("conflict, retry later")}return list})})}
-  syncUI("Syncing…");return go().then(function(list){days=new Set(list);persist();render();syncUI("Synced with "+repo()+" at "+new Date().toLocaleTimeString())})
-  .catch(function(e){syncUI("Sync failed ("+e.message+"). Saved locally; use Sync now.")})});return busy}
-function push(s,add){update(function(set){if(add)set.add(s);else set.delete(s)},(add?"Log ":"Unlog ")+s)}
-function syncAll(){return update(function(set){days.forEach(function(s){set.add(s)})},"Sync office days")}
+function putRemote(list,sha,note){var b={message:note,content:b64e(JSON.stringify(list,null,1)+"\n")};if(sha)b.sha=sha;return gh("PUT",b).then(function(r){if(r.status===409||r.status===422)return{conflict:true};if(!r.ok)throw new Error("GitHub "+r.status);return r.json().then(function(j){return{sha:j&&j.content&&j.content.sha}},function(){return{}})})}
+var KQ="od_pending",lastSha=null,busy=null,again=false,fails=0,retryT=null;
+function queue(){try{var q=JSON.parse(ls(KQ)||"[]");return Array.isArray(q)?q.filter(function(o){return o&&valid(o.d)}):[]}catch(e){return[]}}
+function setQueue(q){ls(KQ,q.length?JSON.stringify(q):null)}
+function hhmm(){var d=new Date();return pad(d.getHours())+":"+pad(d.getMinutes())}
+function wait(ms){return new Promise(function(r){setTimeout(r,ms)})}
+function flush(){if(!tok()||!repo())return Promise.resolve();if(busy){again=true;return busy}
+ if(!navigator.onLine){var n=queue().length;syncUI(n?"Offline. "+n+" change(s) waiting to sync.":"Offline.");return Promise.resolve()}
+ var q=queue();if(q.length)syncUI("Syncing…");
+ busy=(function go(tries){return getRemote().then(function(rm){
+   var set=new Set(rm.days);q.forEach(function(o){if(o.add)set.add(o.d);else set.delete(o.d)});var list=Array.from(set).sort();
+   if(list.join()===rm.days.join()){lastSha=rm.sha;return list}
+   return putRemote(list,rm.sha,q.length===1?(q[0].add?"Log ":"Unlog ")+q[0].d:"Sync office days").then(function(res){
+    if(res.conflict){if(tries<5)return wait(800*(tries+1)).then(function(){return go(tries+1)});throw new Error("conflict, will retry")}
+    lastSha=res.sha;return list})})})(0)
+ .then(function(list){var cur=queue();setQueue(cur.slice(q.length));
+   var s=new Set(list);cur.slice(q.length).forEach(function(o){if(o.add)s.add(o.d);else s.delete(o.d)});
+   days=s;persist();render();fails=0;syncUI("Synced "+hhmm())})
+ .catch(function(e){fails++;var n=queue().length;syncUI("Sync failed: "+e.message+(n?" ("+n+" change(s) queued)":""),true);
+   clearTimeout(retryT);retryT=setTimeout(flush,Math.min(300000,5000*Math.pow(2,fails)))})
+ .then(function(){busy=null;if(again){again=false;return flush()}});return busy}
+function push(s,add){var q=queue();q.push({d:s,add:add});setQueue(q);flush()}
+function syncAll(){var q=queue();days.forEach(function(s){q.push({d:s,add:true})});setQueue(q);return flush()}
 $("save").onclick=function(){var r=$("repo").value.trim(),t=$("tok").value.trim();$("tok").value="";
  if(!RREPO.test(r)){syncUI("Repository must look like owner/name.");return}if(!/^[A-Za-z0-9_]{20,255}$/.test(t)){syncUI("That doesn't look like a GitHub token.");return}
  ls(K.repo,r);ls(K.tok,t);syncAll()};
-$("syncnow").onclick=syncAll;
+$("syncnow").onclick=function(){fails=0;flush()};
 $("clrtok").onclick=function(){ls(K.tok,null);syncUI("Token cleared from this browser.")};
 window.addEventListener("storage",function(e){if(e.key===K.days){try{days=new Set(clean(JSON.parse(e.newValue||"[]")))}catch(x){}render()}});
-document.addEventListener("visibilitychange",function(){if(!document.hidden){var t=iso(new Date());if(t!==today){today=t;render()}}});
-$("repo").value=repo()||"manideepgrandhi/office-days";syncUI();render();if(tok())syncAll();
+document.addEventListener("visibilitychange",function(){if(!document.hidden){var t=iso(new Date());if(t!==today){today=t;render()}flush()}});
+window.addEventListener("online",flush);window.addEventListener("focus",flush);window.addEventListener("pageshow",function(e){if(e.persisted)flush()});
+setInterval(function(){if(!document.hidden)flush()},60000);
+$("repo").value=repo()||"manideepgrandhi/office-days";syncUI();render();if(tok())flush();
 })();
 </script>
 </body>
